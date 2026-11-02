@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Violin Acoustic Spectrum Analyzer</title>
+  <meta name="description" content="Compare long-time-average spectra, band levels, note levels and tap-tone damping of violin recordings. Runs entirely in your browser.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23a0522d'/%3E%3Cpath d='M4 22 L9 14 L13 19 L17 8 L21 17 L24 12 L28 20' fill='none' stroke='white' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/style.css">
+  <script src="vendor/plotly-2.35.2.min.js" defer></script>
+  <script src="vendor/marked-12.0.2.min.js" defer></script>
+  <script src="vendor/jspdf-2.5.1.umd.min.js" defer></script>
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="currentColor"/><path d="M4 22 L9 14 L13 19 L17 8 L21 17 L24 12 L28 20" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span>Violin Acoustic Spectrum Analyzer</span>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button role="tab" id="tab-analyzer" aria-selected="true" aria-controls="page-analyzer">Analyzer</button>
+      <button role="tab" id="tab-readme" aria-selected="false" aria-controls="page-readme">Read Me</button>
+    </nav>
+  </header>
+
+  <main id="page-analyzer" class="layout" role="tabpanel" aria-labelledby="tab-analyzer">
+    <aside class="sidebar">
+      <!-- Recordings: files, examples and recording type -->
+      <section class="card">
+        <h2 class="card-title">Recordings</h2>
+        <label class="dropzone" id="dropzone">
+          <input type="file" id="file-input" accept=".wav,audio/wav,audio/x-wav,audio/wave" multiple>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0-4.5 4.5M12 4l4.5 4.5M4 16v2.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span class="dz-title">Open violin WAV files</span>
+          <span class="dz-sub">Drop files here or click to choose. Ctrl/Shift selects several.</span>
+        </label>
+        <p class="examples">Or try an example: <a href="#" data-example="glis">glissandi, before vs after</a> · <a href="#" data-example="impact">bridge taps</a></p>
+        <div class="field">
+          <span class="label">Recording type</span>
+          <div class="segmented" data-name="rec_type">
+            <button type="button" value="bowed">Bowed strings</button>
+            <button type="button" value="impact">Bridge taps</button>
+          </div>
+        </div>
+        <p class="help" id="rec_type_help"></p>
+        <p class="help">Recordings are analysed in your browser and never leave this computer.</p>
+      </section>
+
+
+      <!-- View: what is drawn -->
+      <section class="card">
+        <h2 class="card-title">View</h2>
+        <div class="segmented" data-name="view" data-show="played">
+          <button type="button" value="spec">Spectrum</button>
+          <button type="button" value="notes">Note levels</button>
+        </div>
+        <div class="field" id="layers-field" hidden>
+          <span class="label">Visible audio layers</span>
+          <div id="file_toggles" class="layers"></div>
+        </div>
+        <label class="field">
+          <span class="label">Band levels</span>
+          <select id="band_set">
+            <option value="zones">Bark violin zones</option>
+            <option value="dw">Dünnwald regions</option>
+            <option value="bark">Bark critical bands</option>
+            <option value="curtin4">Curtin 4 bands</option>
+            <option value="curtin5">Curtin 5 bands</option>
+            <option value="none">None</option>
+          </select>
+        </label>
+        <div class="field">
+          <span class="label">Frequency axis</span>
+          <div class="segmented" data-name="x_scale">
+            <button type="button" value="log">Log</button>
+            <button type="button" value="lin">Linear</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Compare: plot mode and groups -->
+      <section class="card">
+        <h2 class="card-title">Compare</h2>
+        <div class="segmented vertical" data-name="plot_mode">
+          <button type="button" value="indiv">Individual recordings</button>
+          <button type="button" value="mean">Group mean ± error</button>
+          <button type="button" value="diff">Difference (B − A)</button>
+        </div>
+        <div data-show="groups" class="stack">
+          <p class="help">Files sharing a group name are treated as independent replicates of one instrument/condition.</p>
+          <div id="group_inputs" class="groups"></div>
+          <div class="field">
+            <span class="label">Error band</span>
+            <div class="segmented" data-name="err_type">
+              <button type="button" value="se">± 1 SE</button>
+              <button type="button" value="ci" title="Mean ± 1.96 SE. With only a few recordings per group this understates the uncertainty.">≈ 95% CI</button>
+            </div>
+          </div>
+        </div>
+        <div data-show="diff" class="ab">
+          <label class="field"><span class="label">A (reference / before)</span><select id="ref_grp"></select></label>
+          <label class="field"><span class="label">B (comparison / after)</span><select id="cmp_grp"></select></label>
+        </div>
+      </section>
+
+      <!-- Analysis settings -->
+      <details class="card settings" id="adv_settings">
+        <summary>
+          <span class="settings-title">Analysis settings</span>
+          <span class="settings-summary" id="settings_summary"></span>
+        </summary>
+        <div class="settings-body">
+          <div data-show="played">
+            <label class="check"><input type="checkbox" id="restrict_pitch"> Restrict to common pitch range</label>
+            <label class="check"><input type="checkbox" id="gate_on" checked> Ignore quiet frames (silence / gaps)</label>
+            <label class="field range" data-show="gate">
+              <span class="label">Gate threshold <output for="gate_db"></output> dB re loudest frame</span>
+              <input type="range" id="gate_db" min="-60" max="-10" step="5" value="-40">
+            </label>
+          </div>
+          <div data-show="impact">
+            <label class="field range">
+              <span class="label">Window level at frame end <output for="exp_db"></output> dB <span class="muted">(0 = rectangular)</span></span>
+              <input type="range" id="exp_db" min="-60" max="0" step="5" value="-40">
+            </label>
+            <label class="field range">
+              <span class="label">Tap detection threshold <output for="trig_db"></output> dB re strongest tap</span>
+              <input type="range" id="trig_db" min="-30" max="-6" step="2" value="-20">
+            </label>
+            <label class="check"><input type="checkbox" id="skip_clipped" checked> Skip clipped taps</label>
+            <p class="help">Record several taps per file, spaced further apart than one frame, and let each tap ring out. Set the recording level so taps peak around −6 to −12 dBFS.</p>
+          </div>
+          <label class="field">
+            <span class="label">FFT window (samples at 48 kHz)</span>
+            <select id="fft_size">
+              <option value="4096">4096</option>
+              <option value="8192">8192</option>
+              <option value="16384">16384 (recommended)</option>
+              <option value="32768">32768</option>
+            </select>
+          </label>
+          <fieldset class="field">
+            <legend class="label">Level normalization</legend>
+            <label class="check"><input type="radio" name="norm_mode" value="inband" checked> In-band power (188–7080 Hz)</label>
+            <label class="check"><input type="radio" name="norm_mode" value="none"> None (absolute dBFS/Hz)</label>
+          </fieldset>
+          <label class="field">
+            <span class="label">Spectral smoothing</span>
+            <select id="smooth">
+              <option value="0">None</option>
+              <option value="24">1/24 octave</option>
+              <option value="12">1/12 octave</option>
+              <option value="6">1/6 octave</option>
+              <option value="3">1/3 octave</option>
+            </select>
+          </label>
+          <a href="#" id="reset_settings" class="small-link">Restore defaults for this recording type</a>
+        </div>
+      </details>
+
+      <!-- Export -->
+      <section class="card">
+        <h2 class="card-title">Export</h2>
+        <div class="field">
+          <span class="label">Chart format</span>
+          <div class="segmented" data-name="file_type">
+            <button type="button" value="png">PNG</button>
+            <button type="button" value="svg">SVG</button>
+            <button type="button" value="pdf">PDF</button>
+          </div>
+        </div>
+        <div class="buttons">
+          <button type="button" class="btn" id="download_plot">Export chart</button>
+          <button type="button" class="btn" id="download_csv">Export curve data (CSV)</button>
+        </div>
+      </section>
+    </aside>
+
+    <section class="main">
+      <div class="plot-card">
+        <div id="welcome" class="welcome">
+          <h2>Compare the sound of violins</h2>
+          <p>Open WAV recordings of bowed glissandi, scales or musical passages, or of bridge taps, to see their long-time-average spectra, band levels, note levels and tap-tone damping. Repeated takes are grouped automatically from the file names, so you can compare instruments or before and after an adjustment.</p>
+          <p>No recordings yet? Load an example: <a href="#" data-example="glis">glissandi, before vs after</a> or <a href="#" data-example="impact">bridge taps</a>. The <a href="#" id="welcome-readme">Read Me</a> explains how to make good recordings.</p>
+        </div>
+        <div id="plot-wrap" class="plot-wrap" hidden>
+          <div id="plot"></div>
+          <div id="cursor" class="cursor" hidden></div>
+          <div id="plot-message" class="plot-message" hidden></div>
+        </div>
+        <div id="busy" class="busy" hidden><div class="spinner"></div><span id="busy-text">Working…</span></div>
+      </div>
+      <div class="toolbar" id="toolbar" hidden>
+        <button type="button" class="btn btn-sm" id="reset_zoom">Reset zoom</button>
+        <div id="cursor_readout" class="readout"></div>
+      </div>
+      <div id="band_box" class="note-box muted-box" hidden></div>
+      <div id="tuning_note" class="note-box" hidden></div>
+      <div id="damping_box" class="note-box muted-box" hidden></div>
+      <p class="help" id="plot-help" hidden>Drag across the plot to zoom into a frequency range; double-click or press Reset zoom to zoom out. Hover (or tap) for a frequency and level readout.</p>
+    </section>
+  </main>
+
+  <main id="page-readme" class="readme-page" role="tabpanel" aria-labelledby="tab-readme" hidden>
+    <article id="readme" class="readme">Loading…</article>
+  </main>
+
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+</body>
+</html>
